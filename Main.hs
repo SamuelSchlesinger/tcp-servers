@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE DataKinds #-}
@@ -7,7 +8,6 @@ module Main where
 
 import Data.IORef
 import Control.Concurrent
-import Options.Commander
 import Control.Exception
 import Data.Word
 import Network.Socket
@@ -23,6 +23,16 @@ data Server = Server
 data ServerConfig = ServerConfig
   { maximumQueuedConnections :: Int
   , serverAddress :: SockAddr }
+
+withServer :: ServerConfig -> (Server -> IO a) -> IO a
+withServer serverConfig action = uninterruptibleMask \restore -> do
+  server <- createServer serverConfig
+  catch (Right <$> action server) (pure . Left @SomeException)
+    >>= \case
+      Left err -> do
+        destroyServer server
+        throwIO err
+      Right a -> pure a
 
 createServer :: ServerConfig -> IO Server
 createServer serverConfig@ServerConfig
@@ -47,16 +57,13 @@ runServer perClient server@Server
     client <- accept listener
     forkIO $ uncurry perClient client
 
-withServer :: ServerConfig -> (Server -> IO ()) -> IO ()
-withServer serverConfig = bracket (createServer serverConfig) destroyServer
-
-data ClientConfig = ClientConfig
-  { remoteAddress :: SockAddr }
-
 data Client = Client
   { interface :: Socket
   , clientConfig :: ClientConfig
   }
+
+data ClientConfig = ClientConfig
+  { remoteAddress :: SockAddr }
 
 createClient :: ClientConfig -> IO Client
 createClient clientConfig@ClientConfig
@@ -74,25 +81,21 @@ withClient clientConfig = bracket (createClient clientConfig) destroyClient
 main :: IO ()
 main = do
   n <- newIORef 0
-  sequence_ [forkIO $ forever $ do
-    threadDelay 10
-    client <- createClient clientConfig
-    let cliSock = interface client
-    send cliSock "hello" 
-    bs <- recv cliSock 12
-    guard (bs == "how are you?")
-    pure () | i <- [1..4]]
+  sequence_ do
+    _ <- [1..4]
+    pure . forever $ do
+      threadDelay 10
+      client <- createClient clientConfig
+      let cliSock = interface client
+      sendMany cliSock ["h","e","l","l","o"]
+      bs <- recv cliSock 12
+      guard (bs == "how are you?")
+      pure ()
   withServer serverConfig (runServer (perClient n))
   where
-    clientConfig = ClientConfig {
-        remoteAddress =
-          SockAddrInet 8081 (tupleToHostAddress (127, 0, 0, 1))
-      }
-    serverConfig = ServerConfig {
-        maximumQueuedConnections = 100,
-        serverAddress =
-          SockAddrInet 8081 (tupleToHostAddress (127, 0, 0, 1)) 
-      }
+    socketAddress = SockAddrInet 8081 (tupleToHostAddress (127, 0, 0, 1))
+    clientConfig = ClientConfig { remoteAddress = socketAddress }
+    serverConfig = ServerConfig { maximumQueuedConnections = 100, serverAddress = socketAddress }
     perClient n clientSocket _ = flip finally (close clientSocket) $ do
       nn <- atomicModifyIORef' n (\n -> (n + 1, n))
       bs <- recv clientSocket 10

@@ -19,10 +19,10 @@ extra-source-files:  CHANGELOG.md
 
 executable fast-http-server
   main-is:             Main.hs
-  build-depends:       base >=4.13 && <4.14,
-                       bytestring >=0.8 && <0.11,
-                       network >=3.0 && <4,
-                       commander-cli >=0.7,
-                       text >=1.2 && <2
+  build-depends:       base >=4.12,
+                       bytestring >=0.10,
+                       network >=3.0,
+                       text >=1.2,
+                       network-simple >=0.4
   default-language:    Haskell2010
   ghc-options: -threaded -O2 "-with-rtsopts=-N -g1"
